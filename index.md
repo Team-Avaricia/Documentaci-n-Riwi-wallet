@@ -1,2 +1,2 @@
 ## 1. Configuración de wiki.js
-[Ir a configuración](wiki_config.md)
+[Ir a Configuración Inicial del Proyecto](README.md)
