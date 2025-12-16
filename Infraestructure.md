@@ -1,6 +1,6 @@
 # Riwi Wallet - Infrastructure and CI/CD
 
-Complete documentation of the microservices-based (SOA) infrastructure with automated CI/CD for the Riwi Wallet project.
+Complete documentation of the microservices-based infrastructure (SOA) with automated CI/CD for the Riwi Wallet project.
 
 ---
 
@@ -14,6 +14,7 @@ Complete documentation of the microservices-based (SOA) infrastructure with auto
 6. [Nginx Configuration](#nginx-configuration)
 7. [Secrets Management](#secrets-management)
 8. [Maintenance and Troubleshooting](#maintenance-and-troubleshooting)
+9. [VPS Security](#vps-security)
 
 ---
 
@@ -23,13 +24,13 @@ Complete documentation of the microservices-based (SOA) infrastructure with auto
 
 - **Backend API**: .NET Core 8.0
 - **Chatbot**: Spring Boot (Java 21)
-- **Frontend**: Vue.js 3.5 + Vite 7 + TypeScript + Pinia + TailwindCSS 4
+- **Frontend**: Vue.js (pending)
 - **Database**: PostgreSQL 16
 - **Cache**: Redis 7
 - **Automation**: n8n
 - **Documentation**: Wiki.js
 - **Monitoring**: Prometheus + Grafana + Portainer
-- **Reverse Proxy**: Nginx
+- **Reverse proxy**: Nginx
 - **Containers**: Docker
 
 ### Architecture Diagram
@@ -39,8 +40,7 @@ Complete documentation of the microservices-based (SOA) infrastructure with auto
 │                    VPS (4GB RAM)                    │
 ├─────────────────────────────────────────────────────┤
 │                                                     │
-│  🌐 Nginx (Reverse Proxy)                           │
-│      ├─ avaricia.crudzaso.com → Frontend (8080)    │
+│  🌐 Nginx (Reverse Proxy)                          │
 │      ├─ api.domain.com → .NET API (5001)           │
 │      ├─ chatbot.domain.com → Chatbot (5002)        │
 │      ├─ wiki.domain.com → Wiki.js (3000)           │
@@ -51,9 +51,7 @@ Complete documentation of the microservices-based (SOA) infrastructure with auto
 │      ├─ Grafana (9000)                             │
 │      └─ Portainer (9443)                           │
 │                                                     │
-│  🔵 Core Services                                  │
-│      ├─ Vue.js Frontend (Port 8080)                │
-│      │   └─ CI/CD: GitHub Actions                  │
+│  🔵 Main Services                                   │
 │      ├─ .NET API (Port 5001)                       │
 │      │   └─ CI/CD: GitHub Actions                  │
 │      ├─ Spring Boot Chatbot (Port 5002)            │
@@ -63,12 +61,12 @@ Complete documentation of the microservices-based (SOA) infrastructure with auto
 │      └─ n8n (Port 5678)                            │
 │          └─ Manual deployment                      │
 │                                                     │
-│  🗄️ Infrastructure                                │
+│  🗄️ Infrastructure                                 │
 │      ├─ PostgreSQL (Port 5432)                     │
 │      │   └─ DBs: riwiwallet_db, wiki               │
 │      └─ Redis (Port 6379)                          │
 │                                                     │
-│  🌐 Docker Network                                 │
+│  🌐 Docker Network                                  │
 │      └─ riwi_network (bridge)                      │
 │                                                     │
 └─────────────────────────────────────────────────────┘
@@ -80,7 +78,7 @@ Complete documentation of the microservices-based (SOA) infrastructure with auto
 
 ### 0. Firewall Configuration (UFW)
 
-**Goal:** Implement the first layer of defense following the Principle of Least Privilege (deny all, allow only what is essential) to protect internal Docker services.
+**Goal:** Implement the first layer of defense following the Principle of Least Privilege (deny all, allow only essentials) to protect internal Docker services.
 
 ```bash
 # Install UFW
@@ -91,7 +89,7 @@ sudo apt install ufw -y
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
 
-# Allow essential access: SSH (22) and Reverse Proxy (80, 443)
+# Allow essential access: SSH (port 22) and Reverse Proxy (80, 443)
 sudo ufw allow ssh comment 'Allow SSH access for administration'
 sudo ufw allow http comment 'Allow HTTP web traffic'
 sudo ufw allow https comment 'Allow HTTPS web traffic (SSL)'
@@ -99,9 +97,28 @@ sudo ufw allow https comment 'Allow HTTPS web traffic (SSL)'
 # Enable Firewall
 sudo ufw enable
 
-# Check status
+# Verify status
 sudo ufw status numbered
 ```
+
+**Expected result:**
+```
+Status: active
+
+     To                         Action      From
+     --                         ------      ----
+[ 1] 22/tcp                     ALLOW IN    Anywhere                   # Allow SSH access for administration
+[ 2] 80/tcp                     ALLOW IN    Anywhere                   # Allow HTTP web traffic
+[ 3] 443/tcp                    ALLOW IN    Anywhere                   # Allow HTTPS web traffic (SSL)
+[ 4] 22/tcp (v6)                ALLOW IN    Anywhere (v6)              # Allow SSH access for administration
+[ 5] 80/tcp (v6)                ALLOW IN    Anywhere (v6)              # Allow HTTP web traffic
+[ 6] 443/tcp (v6)               ALLOW IN    Anywhere (v6)              # Allow HTTPS web traffic (SSL)
+```
+
+**Important notes:**
+- ✅ **Only these ports are externally accessible**. All Docker services (PostgreSQL, Redis, n8n, Wiki.js, Grafana, Portainer) are **protected** and only accessible through Nginx or within the Docker network.
+- ⚠️ **Do not expose service ports directly** (5001, 5002, 3000, 5678, 9000, 9090, etc.) unless absolutely necessary for temporary development/debugging.
+- 🔒 **The Principle of Least Privilege** ensures only HTTP/HTTPS (reverse proxy) and SSH (administration) are accessible from the Internet.
 
 ### 1. Create Base Infrastructure
 
@@ -115,6 +132,8 @@ docker volume create riwi-wallet_riwi_wiki_assets       # Wiki.js
 docker volume create riwi-wallet_n8n_data               # n8n
 docker volume create riwi-wallet_redis_data             # Redis
 ```
+
+**Why?** Volumes persist data even if containers are deleted. The network allows containers to communicate by name.
 
 ### 2. Configure SSH for CI/CD
 
@@ -207,7 +226,7 @@ openssl rand -hex 32
 # Create database
 docker exec db psql -U riwi_user -c "CREATE DATABASE wiki;"
 
-# Run Wiki.js
+# Start Wiki.js
 docker run -d \
   --name riwi_wiki \
   --restart unless-stopped \
@@ -225,147 +244,19 @@ docker run -d \
   ghcr.io/requarks/wiki:2
 ```
 
-**Git Sync Configuration:**
+**Git Sync configuration:**
 1. Access `http://VPS_IP:3000`
 2. Go to **Administration** → **Storage**
 3. Configure Git with your documentation repository
-4. Wiki.js will pull automatically every 5 minutes
-
-### Vue.js Frontend (SPA)
-
-```bash
-# Container is deployed automatically via CI/CD
-# Final configuration on the VPS:
-
-docker run -d \
-  --name front-vue \
-  --restart unless-stopped \
-  --network riwi_network \
-  -p 8080:80 \
-  --memory="512m" \
-  --cpus="0.5" \
-  <DOCKER_USERNAME>/front-vue:latest
-```
-
-**Frontend Stack:**
-- Vue 3.5.25 (Composition API)
-- Vite 7.1 (Ultra-fast build tool)
-- TypeScript 5.9
-- Pinia 3.0 (State management)
-- Vue Router 4.6 (Routing)
-- TailwindCSS 4.1 (Utility-first CSS)
-- Axios 1.13 (HTTP client)
-- Vue Toastification (Notifications)
-
-**Build Features:**
-- **Multi-stage build**: Reduces final image size
-- **Optimized Nginx**: Gzip, asset caching, SPA routing
-- **Environment variables**: API URLs injected at build time
-- **Immutable cache**: Hashed assets cached for 1 year
-- **Linux compatibility**: Regenerates package-lock.json during build
-
-**Nginx Optimizations:**
-- Gzip compression for all assets
-- 1-year Cache-Control for `/assets/`
-- `try_files` configured for SPA routing
-- `index.html` never cached to always serve the latest version
+4. Wiki.js will pull every 5 minutes automatically
 
 ---
 
 ## 🔄 Implemented CI/CD
 
-### Vue.js Frontend
-
-**Repository:** `Frontend`
-
-**Structure:**
-```
-repo/
-├── .github/
-│   └── workflows/
-│       └── ci-cd.yml
-├── nginx.conf
-├── Dockerfile
-├── .dockerignore
-├── package.json
-├── vite.config.ts
-├── tsconfig.json
-├── tailwind.config.js
-└── src/
-    ├── main.ts
-    ├── App.vue
-    ├── router/
-    ├── stores/
-    ├── components/
-    └── views/
-```
-
-**Dockerfile:** Multi-stage build (Node 20.19-alpine + Nginx Alpine)
-
-**Required GitHub Secrets:**
-- `DOCKER_USERNAME` - Docker Hub username
-- `DOCKER_PASSWORD` - Docker Hub token
-- `SSH_HOST` - VPS IP
-- `SSH_USER` - SSH user
-- `SSH_PRIVATE_KEY` - Full SSH private key
-- `VITE_AUTH_API_URL` - Auth API URL (build time)
-- `VITE_MAIN_API_URL` - Main API URL (build time)
-
-**Workflow:** `.github/workflows/ci-cd.yml`
-
-Trigger: Push to `main`
-
-**Process:**
-1. **Build and Push Job:**
-   - Checkout code
-   - Login to Docker Hub
-   - Build Docker image with build args:
-     - `VITE_AUTH_API_URL`
-     - `VITE_MAIN_API_URL`
-   - Push to Docker Hub with `latest` tag
-
-2. **Deploy to VPS Job:**
-   - SSH connection to VPS
-   - Pull new image BEFORE stopping container (reduced downtime)
-   - Stop and remove current container
-   - Run new container with resource limits
-   - Cleanup dangling images with `docker image prune -f`
-
-**Pipeline Optimizations:**
-- ✅ Pull image before stopping container (minimized downtime)
-- ✅ Regenerate package-lock.json for Linux compatibility
-- ✅ Remove npm dependency cache before install
-- ✅ Build-time environment variable injection
-- ✅ Automatic disk space cleanup
-
-**Nginx Configuration (nginx.conf):**
-```nginx
-server {
-    listen 80;
-    server_name localhost;
-    root /usr/share/nginx/html;
-    index index.html;
-
-    gzip on;
-    gzip_min_length 1000;
-    gzip_types text/plain text/css application/json application/javascript;
-
-    location /assets/ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-        access_log off;
-    }
-
-    location / {
-        add_header Cache-Control "no-store, no-cache, must-revalidate";
-        try_files $uri $uri/ /index.html;
-    }
-}
-```
-
 ### .NET API
 
-**Repository:** `Micro-Back-Brahiam`
+**Repository:** `riwi-wallet-api-net` (or your name)
 
 **Structure:**
 ```
@@ -382,92 +273,630 @@ repo/
 **Dockerfile location:** `src/API/Dockerfile`
 
 **Required GitHub Secrets:**
-- `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`
-- `DOCKER_USERNAME`, `DOCKER_PASSWORD`
-- `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_PORT`
+- `VPS_HOST` - VPS IP
+- `VPS_USER` - SSH user
+- `VPS_SSH_KEY` - Complete SSH private key
+- `DOCKER_USERNAME` - Docker Hub user
+- `DOCKER_PASSWORD` - Docker Hub token
+- `DB_HOST` - `db`
+- `DB_NAME` - `riwiwallet_db`
+- `DB_USER` - `riwi_user`
+- `DB_PASSWORD` - PostgreSQL password
+- `DB_PORT` - `5432`
 
-Trigger: Push to `main` or `develop`
+**Workflow:** `.github/workflows/ci-cd.yml`
+
+Trigger: Push to `main` or `development`
+
+**Process:**
+1. Checkout code
+2. Login to Docker Hub
+3. Build Docker image (multi-stage if applicable)
+4. Push to Docker Hub with `latest` and `SHA` tags
+5. SSH to VPS
+6. Stop previous container
+7. Pull new image
+8. Start new container
+9. Verify status
+10. Clean old images
 
 ### Spring Boot Chatbot
 
 **Repository:** `riwiwallet-sb-service`
 
+**Structure:**
+```
+repo/
+├── .github/
+│   └── workflows/
+│       └── ci-cd.yml
+├── Dockerfile
+├── .dockerignore
+├── pom.xml
+├── src/
+└── ...
+```
+
+**Dockerfile:** Project root (multi-stage with Maven)
+
 **Additional GitHub Secrets:**
-- All .NET API secrets plus:
-- `OPENAI_API_KEY`, `OPENAI_MODEL`
+- All from .NET API +
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL` (e.g., `gpt-4o-mini`)
 - `TELEGRAM_BOT_TOKEN`
 - `MS_CORE_API_KEY`
 - `APP_FRONTEND_URL`
-- `JWT_SECRET`, `JWT_EXPIRATION`
-- `WHATSAPP_*`, `GOOGLE_*`, `MICROSOFT_*` (optional)
+- `JWT_SECRET`
+- `JWT_EXPIRATION`
+- `WHATSAPP_ACCESS_TOKEN` (empty if not used)
+- `WHATSAPP_PHONE_NUMBER_ID` (empty if not used)
+- `WHATSAPP_VERIFY_TOKEN` (empty if not used)
+- `GOOGLE_CLIENT_ID` (empty if not using Google OAuth)
+- `GOOGLE_CLIENT_SECRET` (empty if not used)
+- `MICROSOFT_CLIENT_ID` (empty if not using Microsoft OAuth)
+- `MICROSOFT_CLIENT_SECRET` (empty if not used)
 
 **Generate secrets:**
 ```bash
+# JWT Secret
 openssl rand -base64 64
+
+# MS Core API Key
 openssl rand -hex 32
 ```
+
+**Important environment variables:**
+- `SPRING_PROFILES_ACTIVE=production`
+- `ms.core.base-url=http://netapi_gestor_finanzas:8080`
+- `server.forward-headers-strategy=FRAMEWORK`
+- `server.use-forward-headers=true`
+- All Spring Boot configurations from secrets
+
+### Advantages of Implemented CI/CD
+
+✅ **Automatic deployment** on every push  
+✅ **Zero downtime** - only affected service restarts  
+✅ **Easy rollback** - tags with commit SHA  
+✅ **Security** - credentials in GitHub Secrets, never in code  
+✅ **Independence** - each service with its own pipeline  
+✅ **Traceability** - complete history in GitHub Actions  
 
 ---
 
 ## 📊 Monitoring Stack
 
-### Services
+### Installation
 
-| Service | Port | RAM | Purpose |
-|--------|------|-----|---------|
-| Prometheus | 9090 | 256MB | Metrics collection |
-| Grafana | 9000 | 256MB | Dashboards |
-| Portainer | 9443 | 128MB | Container management |
+```bash
+# Create directory
+mkdir -p ~/monitoring
+cd ~/monitoring
+
+# Create prometheus.yml (see content below)
+nano prometheus.yml
+
+# Create docker-compose.yml (see content below)
+nano docker-compose.yml
+
+# Start services
+docker-compose up -d
+```
+
+### Stack Services
+
+| Service | Port | RAM | Function |
+|---------|------|-----|----------|
+| Prometheus | 9090 | 256MB | Metrics collection and storage |
+| Grafana | 9000 | 256MB | Visualization (dashboards) |
+| Portainer | 9443 | 128MB | Visual container management |
 | Node Exporter | 9100 | 64MB | VPS metrics |
 | Postgres Exporter | 9187 | 64MB | PostgreSQL metrics |
 | Redis Exporter | 9121 | 64MB | Redis metrics |
 
-**Total usage:** ~832MB RAM
+**Total consumption:** ~832MB RAM
+
+### Interface Access
+
+- **Prometheus:** `http://VPS_IP:9090`
+- **Grafana:** `http://VPS_IP:9000`
+  - User: `admin`
+  - Password: (configured in `.env` or `admin123` by default)
+- **Portainer:** `https://VPS_IP:9443`
+  - Create admin user on first access
+
+### Grafana Configuration
+
+1. **Add Data Source:**
+   - Configuration → Data sources → Add data source
+   - Select Prometheus
+   - URL: `http://prometheus:9090`
+   - Save & Test
+
+2. **Import Dashboards:**
+   - + → Import
+   - Use these IDs:
+     - `1860` - Node Exporter Full (VPS)
+     - `14282` - cAdvisor alternative / Docker
+     - `9628` - PostgreSQL Database
+     - `763` - Redis Dashboard
+
+### Monitored Metrics
+
+**System (Node Exporter):**
+- CPU usage, load average
+- RAM usage, swap
+- Available disk, I/O
+- Network traffic
+
+**PostgreSQL:**
+- Active connections
+- Queries per second
+- Cache hit ratio
+- Locks and deadlocks
+
+**Redis:**
+- Connections
+- Total keys
+- Hit/miss ratio
+- Memory used
+
+**Chatbot (Spring Boot Actuator):**
+- JVM heap memory
+- HTTP requests
+- Response times
+- Thread count
+
+**Containers (Portainer):**
+- Status of each container
+- CPU and RAM per container
+- Network I/O
+- Real-time logs
 
 ---
 
 ## 🌐 Nginx Configuration
 
-Includes reverse proxy per service, WebSocket support, and SSL with Certbot.
+### Installation
 
+```bash
+sudo apt update
+sudo apt install nginx -y
+sudo systemctl start nginx
+sudo systemctl enable nginx
+```
+
+### File Structure
+
+```
+/etc/nginx/
+├── sites-available/
+│   ├── api.riwi-wallet.conf
+│   ├── chatbot.riwi-wallet.conf
+│   ├── wiki.riwi-wallet.conf
+│   └── n8n.riwi-wallet.conf
+└── sites-enabled/
+    └── (symlinks to sites-available)
+```
+
+### Per-Service Configuration
+
+#### Chatbot (Example)
+
+```nginx
+# /etc/nginx/sites-available/chatbot.riwi-wallet.conf
+
+upstream chatbot-backend {
+    server localhost:5002;
+    keepalive 16;
+}
+
+server {
+    listen 80;
+    server_name chatbot.your-domain.com;
+    
+    location / {
+        proxy_pass http://chatbot-backend/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port 443;
+        proxy_set_header X-Forwarded-Ssl on;
+        
+        # WebSocket support
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        
+        proxy_redirect off;
+    }
+}
+```
+
+**Enable configuration:**
+```bash
+sudo ln -s /etc/nginx/sites-available/chatbot.riwi-wallet.conf /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+### SSL with Certbot
+
+```bash
+# Install Certbot
+sudo apt install certbot python3-certbot-nginx -y
+
+# Get certificates
+sudo certbot --nginx -d chatbot.your-domain.com -d api.your-domain.com -d wiki.your-domain.com
+
+# Automatic renewal (already configured by Certbot)
+sudo certbot renew --dry-run
+```
+
+**Required DNS configuration:**
+```
+Type: A
+Name: chatbot
+Value: VPS_IP
+TTL: 3600
+```
+
+Repeat for each subdomain (api, wiki, n8n).
+
+---
+
+## 🔐 VPS Security
+
+### Implemented Security Principles
+
+This project follows cloud infrastructure security best practices:
+
+1. **Principle of Least Privilege** - Only essential ports are exposed
+2. **Defense in Depth** - Multiple security layers (Firewall, Nginx, Docker networks)
+3. **Secrets Management** - Credentials never in code, always in GitHub Secrets
+4. **Reverse Proxy** - Nginx as the only entry point
+5. **Isolated Networks** - Services in private Docker network
+
+### Security Architecture
+
+```
+Internet
+   ↓
+[UFW Firewall] ← Only ports 22, 80, 443
+   ↓
+[Nginx Reverse Proxy] ← Rate limiting, security headers
+   ↓
+[Docker Network: riwi_network] ← Services isolated internally
+   ↓
+[Containers] ← Internal communication by names
+```
+
+### Security Configuration by Layer
+
+#### 1. Firewall (UFW)
+
+**Status:** Active and enabled at boot
+
+**Configured rules:**
+```bash
+# View current rules
+sudo ufw status numbered
+
+# Essential rules
+22/tcp  - SSH (administration)
+80/tcp  - HTTP (redirects to HTTPS)
+443/tcp - HTTPS (Nginx reverse proxy)
+```
+
+**Rule management:**
+```bash
+# Allow temporary port (e.g., debugging)
+sudo ufw allow 9000/tcp comment 'Temporary: Grafana debug'
+
+# Delete rule by number
+sudo ufw status numbered
+sudo ufw delete [number]
+
+# Reload firewall
+sudo ufw reload
+```
+
+#### 2. Nginx as Reverse Proxy
+
+**Security benefits:**
+- ✅ Rate limiting (DDoS protection)
+- ✅ Security headers (X-Frame-Options, CSP, etc.)
+- ✅ SSL/TLS termination (Let's Encrypt certificates)
+- ✅ Malicious request filtering
+- ✅ Centralized logging
+
+**Implemented security headers:**
+```nginx
+server_tokens off;                                           # Hide Nginx version
+add_header X-Frame-Options "DENY" always;                   # Anti-clickjacking
+add_header X-Content-Type-Options "nosniff" always;         # Anti-MIME sniffing
+add_header X-XSS-Protection "1; mode=block" always;         # XSS protection
+add_header Referrer-Policy "strict-origin" always;          # Referrer control
+```
+
+**Rate limiting per service:**
+```nginx
+# Chatbot: 50 requests/minute
+limit_req_zone $binary_remote_addr zone=chatbot_limit:10m rate=50r/m;
+
+# Webhooks: 100 requests/minute
+limit_req_zone $binary_remote_addr zone=webhook_limit:10m rate=100r/m;
+```
+
+#### 3. Isolated Docker Networks
+
+**Main network:** `riwi_network`
+
+**Access by internal names:**
+- `db` → PostgreSQL (port 5432, NOT externally exposed)
+- `riwi_redis` → Redis (port 6379, NOT exposed)
+- `netapi_gestor_finanzas` → .NET API
+- `riwiwallet_chatbot` → Chatbot
+
+**Verify isolation:**
+```bash
+# View services on the network
+docker network inspect riwi_network
+
+# Services are NOT accessible from Internet directly
+# Only through Nginx (reverse proxy)
+```
+
+#### 4. Secrets Management
+
+**GitHub Secrets (per repository):**
+- Encryption at rest
+- Audited access
+- Never visible in logs
+- Rotation without code changes
+
+**Never in code:**
+```bash
+❌ password: "J9YoXTAy77bVPxwMtArRHfXDC"
+✅ password: ${{ secrets.DB_PASSWORD }}
+```
+
+**Best practices:**
+```bash
+# Generate secure secrets
+openssl rand -base64 32    # Passwords
+openssl rand -hex 32       # API Keys
+openssl rand -base64 64    # JWT Secrets
+
+# Rotate credentials regularly
+# 1. Generate new secret
+# 2. Update in GitHub Secrets
+# 3. Automatic redeploy via CI/CD
+```
+
+### OAuth Configuration in Nginx
+
+For OAuth (Google, Microsoft) to work correctly with reverse proxy:
+
+```nginx
+# CRITICAL headers for OAuth
+proxy_set_header Host $host;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_set_header X-Forwarded-Host $host;
+proxy_set_header X-Forwarded-Port 443;
+proxy_set_header X-Forwarded-Ssl on;
+proxy_redirect off;
+```
+
+**Environment variables in Spring Boot:**
+```bash
+-e "server.forward-headers-strategy=FRAMEWORK"
+-e "server.use-forward-headers=true"
+```
 ---
 
 ## 🔐 Secrets Management
 
-- Never hardcode credentials
-- Always use GitHub Secrets
-- Rotate credentials periodically
-- Audit access regularly
+### Security Principles
+
+✅ **NEVER** hardcode credentials in code  
+✅ **ALWAYS** use GitHub Secrets for CI/CD  
+✅ **ROTATE** credentials regularly  
+✅ **AUDIT** secret access in GitHub  
+
+### Secrets per Repository
+
+#### .NET API
+```
+VPS_HOST, VPS_USER, VPS_SSH_KEY
+DOCKER_USERNAME, DOCKER_PASSWORD
+DB_HOST, DB_NAME, DB_USER, DB_PASSWORD, DB_PORT
+```
+
+#### Chatbot
+```
+(All from .NET API +)
+OPENAI_API_KEY, OPENAI_MODEL
+TELEGRAM_BOT_TOKEN
+MS_CORE_API_KEY, APP_FRONTEND_URL
+JWT_SECRET, JWT_EXPIRATION
+WHATSAPP_*, GOOGLE_*, MICROSOFT_* (optional)
+```
+
+### Add Secret in GitHub
+
+1. Go to repository
+2. Settings → Secrets and variables → Actions
+3. New repository secret
+4. Name: `SECRET_NAME`
+5. Value: `secret_value`
+6. Add secret
+
+### Generate Secure Credentials
+
+```bash
+# JWT Secret (64 bytes in base64)
+openssl rand -base64 64
+
+# API Keys (32 bytes in hex)
+openssl rand -hex 32
+
+# Passwords (random generator)
+openssl rand -base64 32
+
+# SSH Key pair for CI/CD
+ssh-keygen -t ed25519 -C "ci-cd-service-name"
+```
 
 ---
 
 ## 🛠️ Maintenance and Troubleshooting
 
-Includes Docker commands, logs, restarts, backups, common issues, and recovery procedures.
+### Useful Commands
 
+#### View Service Status
+```bash
+# All containers
+docker ps
+
+# Only Riwi Wallet services
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep riwi
+
+# View resource usage
+docker stats
+```
+
+#### Logs
+```bash
+# View service logs
+docker logs riwiwallet_chatbot
+
+# Last 50 lines
+docker logs riwiwallet_chatbot --tail 50
+
+# Follow logs in real time
+docker logs riwiwallet_chatbot -f
+
+# CI/CD logs
+# View in GitHub → Actions → specific workflow
+```
+
+#### Restart Services
+```bash
+# Restart a container
+docker restart riwiwallet_chatbot
+
+# Restart entire monitoring stack
+cd ~/monitoring
+docker-compose restart
+
+# Restart Nginx
+sudo systemctl restart nginx
+```
+
+#### Clean Resources
+```bash
+# Clean unused images
+docker image prune -a
+
+# Clean stopped containers
+docker container prune
+
+# Clean everything (CAUTION: doesn't delete volumes)
+docker system prune -a
+
+# View disk usage
+docker system df
+```
+
+### Common Issues
+
+#### 1. Container restarts constantly
+
+**Symptom:** `docker ps` shows "Restarting"
+
+**Diagnosis:**
+```bash
+docker logs container_name --tail 100
+docker inspect container_name | grep -A 10 "State"
+```
+
+**Common causes:**
+- DB connection error (verify PostgreSQL is running)
+- Missing environment variable
+- Port in use
+- Out of memory
+
+#### 2. CI/CD fails on deploy
+
+**Symptom:** Workflow in red in GitHub Actions
+
+**Diagnosis:**
+- View workflow logs in GitHub Actions
+- Verify configured secrets
+- Test SSH connection manually
+
+**Common causes:**
+- Incorrect or missing secret
+- SSH key without permissions
+- Firewall blocking SSH
+- Docker volume or network doesn't exist
+
+#### 3. Nginx 502 Bad Gateway
+
+**Symptom:** 502 error when accessing via domain
+
+**Diagnosis:**
+```bash
+sudo nginx -t
+sudo tail -f /var/log/nginx/error.log
+curl http://localhost:PORT  # test direct
+```
+
+**Common causes:**
+- Backend container not running
+- Incorrect port in upstream
+- Incorrect container name
+
+#### 4. Out of Memory (OOM)
+
+**Symptom:** Containers killed unexpectedly
+
+**Diagnosis:**
+```bash
+docker stats
+free -h
+dmesg | grep -i "out of memory"
+```
+
+**Solution:**
+- Reduce memory limits per container
+- Add swap
+- Optimize services (e.g., reduce workers)
 ---
+## 📚 References and Resources
 
-## 📈 Success Metrics
-
-- 7+ services running
-- RAM usage < 3.5GB
-- Uptime > 99%
-- API response time < 500ms
-- Zero-downtime deployments
-
----
+### Official Documentation
+- [Docker Documentation](https://docs.docker.com/)
+- [GitHub Actions](https://docs.github.com/en/actions)
+- [Nginx Documentation](https://nginx.org/en/docs/)
+- [Prometheus](https://prometheus.io/docs/)
+- [Grafana](https://grafana.com/docs/)
+- [Portainer](https://docs.portainer.io/)
 
 ## 🤝 Contributing
 
-This project follows an SOA architecture with independent repositories.
+This project follows an SOA architecture with independent repositories:
 
----
+- **API .NET:** [[repo-link](https://github.com/Team-Avaricia/Micro-Back-Brahiam.git)]
+- **Chatbot:** [[repo-link](https://github.com/Team-Avaricia/riwiwallet-sb-service.git)]
+- **Frontend Vue.js:** [[repo-link](https://github.com/Team-Avaricia/Frontend.git)] - Vue 3.5 + Vite + TypeScript
+- **Documentación:** Wiki.js sincronizado con [[repo-link](https://github.com/Team-Avaricia/Documentaci-n-Riwi-wallet.git)]
 
-## 📝 Final Notes
-
-Future improvements include staging environments, centralized logging, advanced alerts, and cloud backups.
-
----
-
-*This README documents the complete infrastructure and CI/CD implementation for Riwi Wallet.*
-
+To contribute:
+1. Fork the specific repository
+2. Create branch: `git checkout -b feature/nueva-funcionalidad`
+3. Commit: `git commit -m 'feat: descripción'`
+4. Push: `git push origin feature/nueva-funcionalidad`
+5. Open Pull Request
