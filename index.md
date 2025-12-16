@@ -1,3 +1,2 @@
-## 1. Configuración de wiki.js
-[Ir a Configuración Inicial del Proyecto](README.md)
-test
+## 1. Documentation
+[Infraestructure](Infraestructure.md)
